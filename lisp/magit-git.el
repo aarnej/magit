@@ -861,8 +861,10 @@ tracked file."
   (magit-git-items "diff-files" "-z" "--name-only" "--diff-filter=U"))
 
 (defun magit-ignored-files ()
-  (magit-git-items "ls-files" "-z" "--others" "--ignored"
-                   "--exclude-standard" "--directory"))
+    (let (value)
+      (dolist (elt (magit-git-items "status" "-z" "--ignored") value)
+        (setq value (append value (cons (subseq elt 3) ())))))
+    )
 
 (defun magit-skip-worktree-files ()
   (--keep (and (and (= (aref it 0) ?S)

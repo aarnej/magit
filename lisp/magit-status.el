@@ -795,16 +795,10 @@ of that variable can be set using \"D -- DIRECTORY RET g\"."
 
 (defun magit-insert-files (files directory)
   (while (and files (string-prefix-p (or directory "") (car files)))
-    (let ((dir (file-name-directory (car files))))
-      (if (equal dir directory)
-          (let ((file (pop files)))
-            (magit-insert-section (file file)
-              (insert (propertize file 'font-lock-face 'magit-filename) ?\n)))
-        (magit-insert-section (file dir t)
-          (insert (propertize dir 'file 'magit-filename) ?\n)
-          (magit-insert-heading)
-          (setq files (magit-insert-files files dir))))))
-  files)
+    (let ((file (pop files)))
+      (magit-insert-section (file file)
+        (insert (propertize file 'face 'magit-filename) ?\n))))
+    files)
 
 ;;; _
 (provide 'magit-status)
