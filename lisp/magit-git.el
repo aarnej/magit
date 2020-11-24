@@ -863,7 +863,7 @@ tracked file."
 (defun magit-ignored-files ()
     (let (value)
       (dolist (elt (magit-git-items "status" "-z" "--ignored") value)
-        (setq value (append value (cons (subseq elt 3) ())))))
+        (setq value (append value (cons (cl-subseq elt 3) ())))))
     )
 
 (defun magit-skip-worktree-files ()
