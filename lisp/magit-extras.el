@@ -30,9 +30,13 @@
 (require 'magit)
 
 (declare-function dired-read-shell-command "dired-aux" (prompt arg files))
+;; For `magit-project-status'.
+(declare-function project-root "project" (project))
 
 (defvar ido-exit)
 (defvar ido-fallback)
+(defvar project-prefix-map)
+(defvar project-switch-commands)
 
 (defgroup magit-extras nil
   "Additional functionality for Magit."
@@ -130,6 +134,20 @@ like pretty much every other keymap:
   (setq ido-fallback 'magit-status)                ; for Emacs >= 26.2
   (with-no-warnings (setq fallback 'magit-status)) ; for Emacs 25
   (exit-minibuffer))
+
+;;;###autoload
+(defun magit-project-status ()
+  "Run `magit-status' in the current project's root."
+  (interactive)
+  (magit-status-setup-buffer (project-root (project-current t))))
+
+(with-eval-after-load 'project
+  ;; Only more recent versions of project.el have `project-prefix-map' and
+  ;; `project-switch-commands', though project.el is available in Emacs 25.
+  (when (boundp 'project-prefix-map)
+    (define-key project-prefix-map "m" #'magit-project-status))
+  (when (boundp 'project-switch-commands)
+    (add-to-list 'project-switch-commands '(?m "Magit" magit-status))))
 
 ;;;###autoload
 (defun magit-dired-jump (&optional other-window)
@@ -348,6 +366,13 @@ use `magit-rebase-edit-command' instead of this command."
 
 ;;; Reshelve
 
+(defcustom magit-reshelve-since-committer-only nil
+  "Whether `magit-reshelve-since' changes only the committer dates.
+Otherwise the author dates are also changed."
+  :package-version '(magit . "3.0.0")
+  :group 'magit-commands
+  :type 'boolean)
+
 ;;;###autoload
 (defun magit-reshelve-since (rev)
   "Change the author and committer dates of the commits since REV.
@@ -399,15 +424,18 @@ be used on highly rearranged and unpublished history."
             (magit-with-toplevel
               (magit-run-git-async
                "filter-branch" "--force" "--env-filter"
-               (format "case $GIT_COMMIT in %s\nesac"
-                       (mapconcat (lambda (rev)
-                                    (prog1 (format "%s) \
-export GIT_AUTHOR_DATE=\"%s\"; \
-export GIT_COMMITTER_DATE=\"%s\";;" rev date date)
-                                      (cl-incf date 60)))
-                                  (magit-git-lines "rev-list" "--reverse"
-                                                   range)
-                                  " "))
+               (format
+                "case $GIT_COMMIT in %s\nesac"
+                (mapconcat
+                 (lambda (rev)
+                   (prog1 (concat
+                           (format "%s) " rev)
+                           (and (not magit-reshelve-since-committer-only)
+                                (format "export GIT_AUTHOR_DATE=\"%s\"; " date))
+                           (format "export GIT_COMMITTER_DATE=\"%s\";;" date))
+                     (cl-incf date 60)))
+                 (magit-git-lines "rev-list" "--reverse" range)
+                        " "))
                range "--"))
             (set-process-sentinel
              magit-this-process
@@ -580,11 +608,11 @@ hunk, strip the outer diff marker column."
    ((and current-prefix-arg
          (magit-section-internal-region-p)
          (magit-section-match 'hunk))
-    (deactivate-mark)
     (kill-new (replace-regexp-in-string
                "^[ \\+\\-]" ""
                (buffer-substring-no-properties
-                (region-beginning) (region-end)))))
+                (region-beginning) (region-end))))
+    (deactivate-mark))
    ((use-region-p)
     (call-interactively #'copy-region-as-kill))
    (t

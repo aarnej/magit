@@ -85,6 +85,9 @@
   to drop such commits, then you have to enable ~--autosquash~ in the
   popup and then invoke ~magit-rebase-interactive~.  #3670
 
+- ~magit-rebase-remove-commit~ now supports removing the ~HEAD~
+  commit.  #4195
+
 - The option ~magit-repository-directories~ defaults to ~nil~ again
   because the non-nil default added in v2.90.0 led to surprising
   changes in behavior.  The documentation of this option and the
@@ -376,6 +379,10 @@
 - A regression in ~magit-log-move-to-parent~ prevented it from doing its
   job.  #3682
 
+- Since v2.11.0 ~magit-log-revision-headers-format~ lines in the log
+  output (shown via ~++header~) weren't displayed properly when
+  ~--graph~ was enabled.  #4129
+
 - ~magit-clone~ didn't run ~magit-credential-hook~.  #3683
 
 - ~magit-list-repositories~ failed if one of the repositories that it
@@ -461,6 +468,9 @@
 - Modifying a file, marking it with a "skip-worktree" or "assume
   unchanged" bit, and then modifying it again triggered a failure in
   ~magit-wip-commit-worktree~.  #4037
+
+- ~magit-abbrev-length~ returned an incorrect result when
+  ~core.abbrev~ was explicitly set to "auto".
 
 - Various bug fixes to
   ~magit-branch-delete~ (3e73ff19d),

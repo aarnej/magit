@@ -11,7 +11,7 @@
 ;;	Marius Vollmer <marius.vollmer@gmail.com>
 ;; Maintainer: Jonas Bernoulli <jonas@bernoul.li>
 
-;; Package-Requires: ((emacs "25.1") (dash "20180910") (transient "20190812") (with-editor "20181103"))
+;; Package-Requires: ((emacs "25.1") (dash "20200524") (transient "20200601") (with-editor "20200522"))
 ;; Keywords: git tools vc
 ;; Homepage: https://github.com/magit/magit
 
@@ -175,6 +175,9 @@ The major mode configured here is turned on by the minor mode
 `git-commit-mode'."
   :group 'git-commit
   :type '(choice (function-item text-mode)
+                 (function-item markdown-mode)
+                 (function-item org-mode)
+                 (function :tag "Another mode")
                  (const :tag "No major mode")))
 
 (defcustom git-commit-setup-hook
@@ -309,7 +312,7 @@ already using it, then you probably shouldn't start doing so."
 (defface git-commit-keyword
   '((t :inherit font-lock-string-face))
   "Face used for keywords in commit messages.
-In this context a \"keyword\" is text surrounded be brackets."
+In this context a \"keyword\" is text surrounded by brackets."
   :group 'git-commit-faces)
 
 (define-obsolete-face-alias 'git-commit-note
@@ -696,7 +699,7 @@ With a numeric prefix ARG, go forward ARG comments."
 
 ;;; Headers
 
-(define-transient-command git-commit-insert-pseudo-header ()
+(transient-define-prefix git-commit-insert-pseudo-header ()
   "Insert a commit message pseudo header."
   [["Insert ... by yourself"
     ("a"   "Ack"         git-commit-ack)
@@ -930,8 +933,12 @@ Added to `font-lock-extend-region-functions'."
     (modify-syntax-entry ?`  "." table)
     (set-syntax-table table))
   (setq-local comment-start
-              (or (ignore-errors
-                    (car (process-lines "git" "config" "core.commentchar")))
+              (or (with-temp-buffer
+                    (call-process "git" nil (current-buffer) nil
+                                  "config" "core.commentchar")
+                    (unless (bobp)
+                      (goto-char (point-min))
+                      (buffer-substring (point) (line-end-position))))
                   "#"))
   (setq-local comment-start-skip (format "^%s+[\s\t]*" comment-start))
   (setq-local comment-end-skip "\n")

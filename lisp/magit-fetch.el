@@ -41,12 +41,13 @@ Ignored for Git versions before v2.8.0."
 ;;; Commands
 
 ;;;###autoload (autoload 'magit-fetch "magit-fetch" nil t)
-(define-transient-command magit-fetch ()
+(transient-define-prefix magit-fetch ()
   "Fetch from another repository."
   :man-page "git-fetch"
   ["Arguments"
    ("-p" "Prune deleted branches" ("-p" "--prune"))
-   ("-t" "Fetch all tags" ("-t" "--tags"))]
+   ("-t" "Fetch all tags" ("-t" "--tags"))
+   (7 "-u" "Fetch full history" "--unshallow")]
   ["Fetch from"
    ("p" magit-fetch-from-pushremote)
    ("u" magit-fetch-from-upstream)
@@ -67,7 +68,7 @@ Ignored for Git versions before v2.8.0."
   (magit-run-git-async "fetch" remote args))
 
 ;;;###autoload (autoload 'magit-fetch-from-pushremote "magit-fetch" nil t)
-(define-suffix-command magit-fetch-from-pushremote (args)
+(transient-define-suffix magit-fetch-from-pushremote (args)
   "Fetch from the current push-remote.
 
 With a prefix argument or when the push-remote is either not
@@ -96,7 +97,7 @@ push-remote."
       (format "%s, setting that" v)))))
 
 ;;;###autoload (autoload 'magit-fetch-from-upstream "magit-fetch" nil t)
-(define-suffix-command magit-fetch-from-upstream (remote args)
+(transient-define-suffix magit-fetch-from-upstream (remote args)
   "Fetch from the \"current\" remote, usually the upstream.
 
 If the upstream is configured for the current branch and names

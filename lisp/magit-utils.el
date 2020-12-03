@@ -100,10 +100,12 @@ alphabetical order, depending on your version of Ivy."
     (forge-browse-pullreq     nil t)
     (forge-edit-topic-title   nil t)
     (forge-edit-topic-state   nil t)
+    (forge-edit-topic-milestone nil t)
     (forge-edit-topic-labels  nil t)
     (forge-edit-topic-marks   nil t)
     (forge-edit-topic-assignees nil t)
     (forge-edit-topic-review-requests nil t)
+    (forge-edit-topic-note    nil t)
     (forge-pull-pullreq       nil t)
     (forge-visit-issue        nil t)
     (forge-visit-pullreq      nil t))
@@ -145,15 +147,29 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
                         (const  :tag "use default without confirmation" t)))))
 
 (defconst magit--confirm-actions
-  '((const reverse)           (const discard)
-    (const rename)            (const resurrect)
-    (const untrack)           (const trash)
-    (const delete)            (const abort-rebase)
-    (const abort-merge)       (const merge-dirty)
-    (const drop-stashes)      (const reset-bisect)
-    (const kill-process)      (const delete-unmerged-branch)
-    (const delete-pr-branch)  (const remove-modules)
-    (const stage-all-changes) (const unstage-all-changes)
+  '((const discard)
+    (const reverse)
+    (const stage-all-changes)
+    (const unstage-all-changes)
+    (const delete)
+    (const trash)
+    (const resurrect)
+    (const untrack)
+    (const rename)
+    (const reset-bisect)
+    (const abort-rebase)
+    (const abort-merge)
+    (const merge-dirty)
+    (const delete-unmerged-branch)
+    (const delete-pr-remote)
+    (const drop-stashes)
+    (const amend-published)
+    (const rebase-published)
+    (const edit-published)
+    (const remove-modules)
+    (const remove-dirty-modules)
+    (const trash-module-gitdirs)
+    (const kill-process)
     (const safe-with-wip)))
 
 (defcustom magit-no-confirm nil
@@ -400,7 +416,9 @@ and delay of your graphical environment or operating system."
 ;;; User Input
 
 (defvar helm-completion-in-region-default-sort-fn)
+(defvar helm-crm-default-separator)
 (defvar ivy-sort-functions-alist)
+(defvar ivy-sort-matches-functions-alist)
 
 (defvar magit-completing-read--silent-default nil)
 
@@ -474,7 +492,8 @@ acts similarly to `completing-read', except for the following:
                           predicate
                           require-match initial-input hist def)))
       (setq this-command command)
-      (if (string= reply "")
+      ;; Note: Avoid `string=' to support `helm-comp-read-use-marked'.
+      (if (equal reply "")
           (if require-match
               (user-error "Nothing selected")
             nil)
@@ -521,6 +540,8 @@ into a list."
          (minibuffer-completion-table #'crm--collection-fn)
          (minibuffer-completion-confirm t)
          (helm-completion-in-region-default-sort-fn nil)
+         (helm-crm-default-separator nil)
+         (ivy-sort-matches-functions-alist nil)
          (input
           (cl-letf (((symbol-function 'completion-pcm--all-completions)
                      #'magit-completion-pcm--all-completions))
@@ -555,6 +576,7 @@ to nil."
                         crm-local-must-match-map
                       crm-local-completion-map))
                (helm-completion-in-region-default-sort-fn nil)
+               (ivy-sort-matches-functions-alist nil)
                ;; If the user enters empty input, `read-from-minibuffer'
                ;; returns the empty string, not DEF.
                (input (read-from-minibuffer
@@ -813,49 +835,36 @@ Unless optional argument KEEP-EMPTY-LINES is t, trim all empty lines."
   "Set the header-line using STRING.
 Propertize STRING with the `magit-header-line'.  If the `face'
 property of any part of STRING is already set, then that takes
-precedence.  Also pad the left and right sides of STRING so that
-it aligns with the text area."
+precedence.  Also pad the left side of STRING so that it aligns
+with the text area."
   (setq header-line-format
-        (concat
-         (propertize " " 'display '(space :align-to 0))
-         string
-         (propertize " " 'display
-                     `(space :width
-                             (+ left-fringe
-                                left-margin
-                                ,@(and (eq (car (window-current-scroll-bars))
-                                           'left)
-                                       '(scroll-bar)))))))
-  (magit--add-face-text-property 0 (1- (length header-line-format))
-                                 'magit-header-line t header-line-format))
+        (concat (propertize " " 'display '(space :align-to 0))
+                string)))
 
 (defun magit-face-property-all (face string)
   "Return non-nil if FACE is present in all of STRING."
-  (cl-loop for pos = 0 then (next-single-property-change
-                             pos 'font-lock-face string)
-           unless pos
-             return t
-           for current = (get-text-property pos 'font-lock-face string)
-           unless (if (consp current)
-                      (memq face current)
-                    (eq face current))
-             return nil))
+  (catch 'missing
+    (let ((pos 0))
+      (while (setq pos (next-single-property-change pos 'font-lock-face string))
+        (let ((val (get-text-property pos 'font-lock-face string)))
+          (unless (if (consp val)
+                      (memq face val)
+                    (eq face val))
+            (throw 'missing nil))))
+      (not pos))))
 
 (defun magit--add-face-text-property (beg end face &optional append object)
   "Like `add-face-text-property' but for `font-lock-face'."
-  (cl-loop for pos = (next-single-property-change
-                      beg 'font-lock-face object end)
-           for current = (get-text-property beg 'font-lock-face object)
-           for newface = (if (listp current)
-                             (if append
-                                 (append current (list face))
-                               (cons face current))
-                           (if append
-                               (list current face)
-                             (list face current)))
-           do (progn (put-text-property beg pos 'font-lock-face newface object)
-                     (setq beg pos))
-           while (< beg end)))
+  (while (< beg end)
+    (let* ((pos (next-single-property-change beg 'font-lock-face object end))
+           (val (get-text-property beg 'font-lock-face object))
+           (val (if (listp val) val (list val))))
+      (put-text-property beg pos 'font-lock-face
+                         (if append
+                             (append val (list face))
+                           (cons face val))
+                         object)
+      (setq beg pos))))
 
 (defun magit--propertize-face (string face)
   (propertize string 'face face 'font-lock-face face))
@@ -1104,6 +1113,23 @@ the %s(1) manpage.
 (advice-add 'org-man-export :around
             'org-man-export--magit-gitman)
 
+;;; Kludges for Package Managers
+
+(defun magit--straight-chase-links (filename)
+  "Chase links in FILENAME until a name that is not a link.
+
+This is the same as `file-chase-links', except that it also
+handles fake symlinks that are created by the package manager
+straight.el on Windows.
+
+See <https://github.com/raxod502/straight.el/issues/520>."
+  (when (and (bound-and-true-p straight-symlink-emulation-mode)
+             (fboundp 'straight-chase-emulated-symlink))
+    (when-let ((target (straight-chase-emulated-symlink filename)))
+      (unless (eq target 'broken)
+        (setq filename target))))
+  (file-chase-links filename))
+
 ;;; Bitmaps
 
 (when (fboundp 'define-fringe-bitmap)
@@ -1187,7 +1213,7 @@ Like `message', except that `message-log-max' is bound to nil."
      (save-excursion
        (save-restriction
          (widen)
-         (goto-char ,pos)
+         (goto-char (or ,pos 1))
          ,@body))))
 
 ;;; _

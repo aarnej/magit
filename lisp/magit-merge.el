@@ -38,7 +38,7 @@
 ;;; Commands
 
 ;;;###autoload (autoload 'magit-merge "magit" nil t)
-(define-transient-command magit-merge ()
+(transient-define-prefix magit-merge ()
   "Merge branches."
   :man-page "git-merge"
   :incompatible '(("--ff-only" "--no-ff"))
@@ -47,7 +47,7 @@
    ("-f" "Fast-forward only" "--ff-only")
    ("-n" "No fast-forward"   "--no-ff")
    (magit-merge:--strategy)
-   (5 magit-diff:--diff-algorithm :argument "--Xdiff-algorithm=")
+   (5 magit-diff:--diff-algorithm :argument "-Xdiff-algorithm=")
    (5 magit:--gpg-sign)]
   ["Actions"
    :if-not magit-merge-in-progress-p
@@ -67,7 +67,7 @@
 (defun magit-merge-arguments ()
   (transient-args 'magit-merge))
 
-(define-infix-argument magit-merge:--strategy ()
+(transient-define-argument magit-merge:--strategy ()
   :description "Strategy"
   :class 'transient-option
   ;; key for merge and rebase: "-s"
@@ -133,15 +133,20 @@ if `forge-branch-pullreq' was used to create the merged branch,
 branch, then also remove the respective remote branch."
   (interactive
    (list (magit-read-other-local-branch
-          (format "Merge `%s' into" (magit-get-current-branch))
+          (format "Merge `%s' into"
+                  (or (magit-get-current-branch)
+                      (magit-rev-parse "HEAD")))
           nil
           (when-let ((upstream (magit-get-upstream-branch))
                      (upstream (cdr (magit-split-branch-name upstream))))
             (and (magit-branch-p upstream) upstream)))
          (magit-merge-arguments)))
-  (let ((current (magit-get-current-branch)))
+  (let ((current (magit-get-current-branch))
+        (head (magit-rev-parse "HEAD")))
     (when (zerop (magit-call-git "checkout" branch))
-      (magit--merge-absorb current args))))
+      (if current
+          (magit--merge-absorb current args)
+        (magit-run-git-with-editor "merge" args head)))))
 
 ;;;###autoload
 (defun magit-merge-absorb (branch &optional args)

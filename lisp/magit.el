@@ -219,10 +219,73 @@ and/or `magit-branch-remote-head'."
   "Face for filenames."
   :group 'magit-faces)
 
+;;; Global Bindings
+
+;;;###autoload
+(define-obsolete-variable-alias 'global-magit-file-mode
+  'magit-define-global-key-bindings "Magit 3.0.0")
+
+;;;###autoload
+(defcustom magit-define-global-key-bindings t
+  "Whether to bind some Magit commands in the global keymap.
+
+If this variable is non-nil, then the following bindings may
+be added to the global keymap.  The default is t.
+
+key             binding
+---             -------
+C-x g           magit-status
+C-x M-g         magit-dispatch
+C-c M-g         magit-file-dispatch
+
+These bindings may be added when `after-init-hook' is called.
+Each binding is added if and only if at that time no other key
+is bound to the same command and no other command is bound to
+the same key.  In other words we try to avoid adding bindings
+that are unnecessary, as well as bindings that conflict with
+other bindings.
+
+Adding the above bindings is delayed until `after-init-hook'
+is called to allow users to set the variable anywhere in their
+init file (without having to make sure to do so before `magit'
+is loaded or autoloaded) and to increase the likelihood that
+all the potentially conflicting user bindings have already
+been added.
+
+Setting this variable after the hook has already been called
+has no effect.
+
+We recommend that you bind \"C-c g\" instead of \"C-c M-g\" to
+`magit-file-dispatch'.  The former is a much better binding
+but the \"C-c <letter>\" namespace is strictly reserved for
+users; preventing Magit from using it by default.
+
+Also see info node `(magit)Commands for Buffers Visiting Files'."
+  :package-version '(magit . "3.0.0")
+  :group 'magit-essentials
+  :type 'boolean)
+
+;;;###autoload
+(progn
+  (defun magit-maybe-define-global-key-bindings ()
+    (when magit-define-global-key-bindings
+      (let ((map (current-global-map)))
+        (dolist (elt '(("C-x g"   . magit-status)
+                       ("C-x M-g" . magit-dispatch)
+                       ("C-c M-g" . magit-file-dispatch)))
+          (let ((key (kbd (car elt)))
+                (def (cdr elt)))
+            (unless (or (lookup-key map key)
+                        (where-is-internal def (make-sparse-keymap) t))
+              (define-key map key def)))))))
+  (if after-init-time
+      (magit-maybe-define-global-key-bindings)
+    (add-hook 'after-init-hook 'magit-maybe-define-global-key-bindings t)))
+
 ;;; Dispatch Popup
 
 ;;;###autoload (autoload 'magit-dispatch "magit" nil t)
-(define-transient-command magit-dispatch ()
+(transient-define-prefix magit-dispatch ()
   "Invoke a Magit command from a list of available commands."
   ["Transient and dwim commands"
    [("A" "Apply"          magit-cherry-pick)
@@ -284,8 +347,10 @@ This affects `magit-git-command', `magit-git-command-topdir',
 (defvar magit-git-command-history nil)
 
 ;;;###autoload (autoload 'magit-run "magit" nil t)
-(define-transient-command magit-run ()
+(transient-define-prefix magit-run ()
   "Run git or another command, or launch a graphical utility."
+
+
   [["Run git subcommand"
     ("!" "in repository root"   magit-git-command-topdir)
     ("p" "in working directory" magit-git-command)]
@@ -350,13 +415,14 @@ is run in the top-level directory of the current working tree."
   (magit-process-buffer))
 
 (defun magit-read-shell-command (&optional toplevel initial-input)
-  (let ((dir (abbreviate-file-name
-              (if (or toplevel current-prefix-arg)
-                  (or (magit-toplevel)
-                      (magit--not-inside-repository-error))
-                default-directory))))
+  (let ((default-directory
+          (if (or toplevel current-prefix-arg)
+              (or (magit-toplevel)
+                  (magit--not-inside-repository-error))
+            default-directory)))
     (read-shell-command (if magit-shell-command-verbose-prompt
-                            (format "Async shell command in %s: " dir)
+                            (format "Async shell command in %s: "
+                                    (abbreviate-file-name default-directory))
                           "Async shell command: ")
                         initial-input 'magit-git-command-history)))
 
@@ -400,7 +466,7 @@ and Emacs to it."
     (unless (and toplib
                  (equal (file-name-nondirectory toplib) "magit.el"))
       (setq toplib (locate-library "magit.el")))
-    (setq toplib (and toplib (file-chase-links toplib)))
+    (setq toplib (and toplib (magit--straight-chase-links toplib)))
     (push toplib debug)
     (when toplib
       (let* ((topdir (file-name-directory toplib))
@@ -408,7 +474,7 @@ and Emacs to it."
                       ".git" (file-name-directory
                               (directory-file-name topdir))))
              (static (locate-library "magit-version.el" nil (list topdir)))
-             (static (and static (file-chase-links static))))
+             (static (and static (magit--straight-chase-links static))))
         (or (progn
               (push 'repo debug)
               (when (and (file-exists-p gitdir)
@@ -422,7 +488,8 @@ and Emacs to it."
                   (ignore-errors (delete-file static)))
                 (setq magit-version
                       (let ((default-directory topdir))
-                        (magit-git-string "describe" "--tags" "--dirty")))))
+                        (magit-git-string "describe"
+                                          "--tags" "--dirty" "--always")))))
             (progn
               (push 'static debug)
               (when (and static (file-exists-p static))
@@ -442,9 +509,20 @@ and Emacs to it."
               (push 'dirname debug)
               (let ((dirname (file-name-nondirectory
                               (directory-file-name topdir))))
-                (when (string-match "\\`magit-\\([0-9]\\{8\\}\\.[0-9]*\\)"
-                                    dirname)
-                  (setq magit-version (match-string 1 dirname))))))))
+                (when (string-match "\\`magit-\\([0-9].*\\)" dirname)
+                  (setq magit-version (match-string 1 dirname)))))
+            ;; If all else fails, just report the commit hash. It's
+            ;; better than nothing and we cannot do better in the case
+            ;; of e.g. a shallow clone.
+            (progn
+              (push 'hash debug)
+              ;; Same check as above to see if it's really the Magit repo.
+              (when (and (file-exists-p gitdir)
+                         (file-exists-p
+                          (expand-file-name "../lisp/magit.el" gitdir)))
+                (setq magit-version
+                      (let ((default-directory topdir))
+                        (magit-git-string "rev-parse" "HEAD"))))))))
     (if (stringp magit-version)
         (when print-dest
           (princ (format "Magit %s, Git %s, Emacs %s, %s"
