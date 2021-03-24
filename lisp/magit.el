@@ -1,6 +1,6 @@
 ;;; magit.el --- A Git porcelain inside Emacs  -*- lexical-binding: t; coding: utf-8 -*-
 
-;; Copyright (C) 2008-2020  The Magit Project Contributors
+;; Copyright (C) 2008-2021  The Magit Project Contributors
 ;;
 ;; You should have received a copy of the AUTHORS.md file which
 ;; lists all contributors.  If not, see http://magit.vc/authors.
@@ -47,22 +47,17 @@
 
 ;;; Code:
 
-(require 'cl-lib)
-(require 'dash)
-
-(require 'subr-x)
-
-(require 'with-editor)
-(require 'git-commit)
 (require 'magit-core)
 (require 'magit-diff)
 (require 'magit-log)
 (require 'magit-wip)
 (require 'magit-apply)
 (require 'magit-repos)
+(require 'git-commit)
 
 (require 'format-spec)
 (require 'package nil t) ; used in `magit-version'
+(require 'with-editor)
 
 (defconst magit--minimal-git "2.2.0")
 (defconst magit--minimal-emacs "25.1")
@@ -180,7 +175,7 @@ and/or `magit-branch-remote-head'."
   :group 'magit-faces)
 
 (defface magit-signature-untrusted
-  '((t :foreground "cyan"))
+  '((t :foreground "medium aquamarine"))
   "Face for good untrusted signatures."
   :group 'magit-faces)
 
@@ -200,7 +195,7 @@ and/or `magit-branch-remote-head'."
   :group 'magit-faces)
 
 (defface magit-signature-error
-  '((t :foreground "firebrick3"))
+  '((t :foreground "light blue"))
   "Face for signatures that cannot be checked (e.g. missing key)."
   :group 'magit-faces)
 
@@ -287,6 +282,7 @@ Also see info node `(magit)Commands for Buffers Visiting Files'."
 ;;;###autoload (autoload 'magit-dispatch "magit" nil t)
 (transient-define-prefix magit-dispatch ()
   "Invoke a Magit command from a list of available commands."
+  :info-manual "(magit)Top"
   ["Transient and dwim commands"
    [("A" "Apply"          magit-cherry-pick)
     ("b" "Branch"         magit-branch)
@@ -299,6 +295,7 @@ Also see info node `(magit)Commands for Buffers Visiting Files'."
     ("E" "Ediff"          magit-ediff)]
    [("f" "Fetch"          magit-fetch)
     ("F" "Pull"           magit-pull)
+    ("I" "Init"           magit-init)
     ("l" "Log"            magit-log)
     ("L" "Log (change)"   magit-log-refresh)
     ("m" "Merge"          magit-merge)
@@ -540,7 +537,7 @@ and Emacs to it."
       (setq magit-version 'error)
       (when magit-version
         (push magit-version debug))
-      (unless (equal (getenv "TRAVIS") "true")
+      (unless (equal (getenv "CI") "true")
         ;; The repository is a sparse clone.
         (message "Cannot determine Magit's version %S" debug)))
     magit-version))
@@ -595,7 +592,7 @@ https://github.com/magit/magit/wiki/Don't-set-$GIT_DIR-and-alike" val))
   (let ((version (magit-git-version)))
     (when (and version
                (version< version magit--minimal-git)
-               (not (equal (getenv "TRAVIS") "true")))
+               (not (equal (getenv "CI") "true")))
       (display-warning 'magit (format "\
 Magit requires Git >= %s, you are using %s.
 

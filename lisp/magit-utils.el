@@ -1,6 +1,6 @@
 ;;; magit-utils.el --- various utilities  -*- lexical-binding: t; coding: utf-8 -*-
 
-;; Copyright (C) 2010-2020  The Magit Project Contributors
+;; Copyright (C) 2010-2021  The Magit Project Contributors
 ;;
 ;; You should have received a copy of the AUTHORS.md file which
 ;; lists all contributors.  If not, see http://magit.vc/authors.
@@ -40,9 +40,9 @@
 
 (require 'cl-lib)
 (require 'dash)
-
-(eval-when-compile
-  (require 'subr-x))
+(require 'eieio)
+(require 'seq)
+(require 'subr-x)
 
 (require 'crm)
 
@@ -108,7 +108,8 @@ alphabetical order, depending on your version of Ivy."
     (forge-edit-topic-note    nil t)
     (forge-pull-pullreq       nil t)
     (forge-visit-issue        nil t)
-    (forge-visit-pullreq      nil t))
+    (forge-visit-pullreq      nil t)
+    (forge-visit-topic        nil t))
   "When not to offer alternatives and ask for confirmation.
 
 Many commands by default ask the user to select from a list of
@@ -161,8 +162,10 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
     (const abort-merge)
     (const merge-dirty)
     (const delete-unmerged-branch)
+    (const delete-branch-on-remote)
     (const delete-pr-remote)
     (const drop-stashes)
+    (const set-and-push)
     (const amend-published)
     (const rebase-published)
     (const edit-published)
@@ -172,7 +175,7 @@ The value has the form ((COMMAND nil|PROMPT DEFAULT)...).
     (const kill-process)
     (const safe-with-wip)))
 
-(defcustom magit-no-confirm nil
+(defcustom magit-no-confirm '(set-and-push)
   "A list of symbols for actions Magit should not confirm, or t.
 
 Many potentially dangerous commands by default ask the user for
@@ -240,6 +243,13 @@ References:
   choice (or selecting another branch), but when a branch has
   not been merged yet, also make sure the user is aware of that.
 
+  `delete-branch-on-remote' Deleting a \"remote branch\" may mean
+  deleting the (local) \"remote-tracking\" branch only, or also
+  removing it from the remote itself.  The latter often makes more
+  sense because otherwise simply fetching from the remote would
+  restore the remote-tracking branch, but doing that can be
+  surprising and hard to recover from, so we ask.
+
   `delete-pr-remote' When deleting a branch that was created from
   a pull-request and if no other branches still exist on that
   remote, then `magit-branch-delete' offers to delete the remote
@@ -254,6 +264,15 @@ References:
   to confirm by accepting the default (or selecting another).
   This action only concerns the deletion of multiple stashes at
   once.
+
+Publishing:
+
+  `set-and-push' When pushing to the upstream or the push-remote
+  and that isn't actually configured yet, then the user can first
+  set the target.  If s/he confirms the default too quickly, then
+  s/he might end up pushing to the wrong branch and if the remote
+  repository is configured to disallow fixing such mistakes, then
+  that can be quite embarrassing and annoying.
 
 Edit published history:
 
@@ -369,14 +388,21 @@ Messages which can currently be suppressed using this option are:
   :group 'magit-miscellaneous
   :type '(repeat string))
 
-(defcustom magit-ellipsis ?…
-  "Character used to abbreviate text.
+(defcustom magit-ellipsis (if (char-displayable-p ?…) "…" "...")
+  "String used to abbreviate text in process buffers.
 
-Currently this is used to abbreviate author names in the margin
-and in process buffers to elide `magit-git-global-arguments'."
-  :package-version '(magit . "2.1.0")
+Currently this is only used to elide `magit-git-global-arguments'
+in process buffers.  In the future it may be used in other places
+as well, but not the following:
+
+- Author names in the log margin are always abbreviated using
+  \"…\" or if that is not displayable, then \">\".
+
+- Whether collapsed sections are indicated using ellipsis is
+  controlled by `magit-section-visibility-indicator'."
+  :package-version '(magit . "3.0.0")
   :group 'magit-miscellaneous
-  :type 'character)
+  :type 'string)
 
 (defcustom magit-update-other-window-delay 0.2
   "Delay before automatically updating the other window.
@@ -677,9 +703,11 @@ This is similar to `read-string', but
            (debug (form form &rest (characterp form body))))
   `(prog1 (pcase (read-char-choice
                   (concat ,prompt
-                          ,(concat (mapconcat 'cadr clauses ", ")
-                                   (and verbose ", or [C-g] to abort") " "))
-                  ',(mapcar 'car clauses))
+                          (mapconcat #'identity
+                                     (list ,@(mapcar #'cadr clauses))
+                                     ", ")
+                          ,(if verbose ", or [C-g] to abort " " "))
+                  ',(mapcar #'car clauses))
             ,@(--map `(,(car it) ,@(cddr it)) clauses))
      (message "")))
 
@@ -802,7 +830,11 @@ as STRING."
         (i 0))
     `(let ((,s ,string))
        (let ,(save-match-data
-               (--map (list it (list 'match-string (cl-incf i) s)) varlist))
+               (cl-mapcan (lambda (sym)
+                            (cl-incf i)
+                            (and (not (eq (aref (symbol-name sym) 0) ?_))
+                                 (list (list sym (list 'match-string i s)))))
+                          varlist))
          ,@body))))
 
 (defun magit-delete-line ()
@@ -1129,67 +1161,6 @@ See <https://github.com/raxod502/straight.el/issues/520>."
       (unless (eq target 'broken)
         (setq filename target))))
   (file-chase-links filename))
-
-;;; Bitmaps
-
-(when (fboundp 'define-fringe-bitmap)
-  (define-fringe-bitmap 'magit-fringe-bitmap+
-    [#b00000000
-     #b00011000
-     #b00011000
-     #b01111110
-     #b01111110
-     #b00011000
-     #b00011000
-     #b00000000])
-  (define-fringe-bitmap 'magit-fringe-bitmap-
-    [#b00000000
-     #b00000000
-     #b00000000
-     #b01111110
-     #b01111110
-     #b00000000
-     #b00000000
-     #b00000000])
-
-  (define-fringe-bitmap 'magit-fringe-bitmap>
-    [#b01100000
-     #b00110000
-     #b00011000
-     #b00001100
-     #b00011000
-     #b00110000
-     #b01100000
-     #b00000000])
-  (define-fringe-bitmap 'magit-fringe-bitmapv
-    [#b00000000
-     #b10000010
-     #b11000110
-     #b01101100
-     #b00111000
-     #b00010000
-     #b00000000
-     #b00000000])
-
-  (define-fringe-bitmap 'magit-fringe-bitmap-bold>
-    [#b11100000
-     #b01110000
-     #b00111000
-     #b00011100
-     #b00011100
-     #b00111000
-     #b01110000
-     #b11100000])
-  (define-fringe-bitmap 'magit-fringe-bitmap-boldv
-    [#b10000001
-     #b11000011
-     #b11100111
-     #b01111110
-     #b00111100
-     #b00011000
-     #b00000000
-     #b00000000])
-  )
 
 ;;; Miscellaneous
 
